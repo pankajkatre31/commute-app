@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "20303278435",
+    "project_id": "community-app-1d85a",
+    "storage_bucket": "community-app-1d85a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:20303278435:android:d5a04d7361194f4dc3e356",
+        "android_client_info": {
+          "package_name": "com.example.commute_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "20303278435-qej0lpduesfekj20pccai592vn5oue6o.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyALMv8_koIhKLbGB5O38JIPY0ZaJQDrnw4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "20303278435-qej0lpduesfekj20pccai592vn5oue6o.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
