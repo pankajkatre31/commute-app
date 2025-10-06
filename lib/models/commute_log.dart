@@ -1,4 +1,3 @@
-// lib/models/commute_log.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
@@ -9,19 +8,40 @@ class CommuteLog {
   final String mode;
   final double distanceKm;
   final double productivityScore;
-  final int? durationMinutes; // kept as int (minutes)
+
+  
+  final int? durationMinutes;
+  final int? durationSeconds;
+
+  
   final double? cost;
-  final Map<String, dynamic>? startLocation; // {'lat':..., 'lng':...}
+
+  
+  final double totalCost;
+
+  final Map<String, dynamic>? startLocation; 
   final Map<String, dynamic>? endLocation;
   final String? startAddress;
   final String? endAddress;
-  final double? fatigueLevel;
-  final double? stressLevel;
+  final DateTime? startTime; 
+  final DateTime? endTime; 
+
+  
+  final String? vehicleFuelType;
+
+  
+  final double fatigueLevel;
+  final double stressLevel;
+
   final double? physicalActivity;
   final int? numberOfCommuters;
   final String? missedDeadlines;
-  final List<Map<String, double>>? checkpoints; // [{'lat':..,'lng':..}, ...]
-  final String? polyline; // encoded polyline
+  final List<Map<String, double>>? checkpoints; 
+  final String? polyline; 
+
+  
+  final String weather;
+
   final Timestamp createdAt;
 
   CommuteLog({
@@ -32,45 +52,67 @@ class CommuteLog {
     required this.distanceKm,
     required this.productivityScore,
     this.durationMinutes,
+    this.durationSeconds,
     this.cost,
+    required this.totalCost,
     this.startLocation,
     this.endLocation,
     this.startAddress,
     this.endAddress,
-    this.fatigueLevel,
-    this.stressLevel,
+    this.startTime,
+    this.endTime,
+    this.vehicleFuelType,
+    this.fatigueLevel = 0.0,
+    this.stressLevel = 0.0,
     this.physicalActivity,
     this.numberOfCommuters,
     this.missedDeadlines,
     this.checkpoints,
     this.polyline,
+    required this.weather,
     required this.createdAt,
   });
 
-  /// Convenience: duration as double (null if not provided).
+  
   double? get durationMinutesDouble =>
       durationMinutes == null ? null : durationMinutes!.toDouble();
 
-  /// ✅ Automatically calculated CO₂ emissions
-  double get carbonKg => _estimateCo2Kg(distanceKm, mode);
-
-  /// Helper for carbon calculation
-  static double _estimateCo2Kg(double km, String mode) {
-    const Map<String, double> emissionFactors = {
+  
+  static double estimateCo2Kg(double km, String mode, {String? vehicleFuelType}) {
+    
+    const Map<String, double> baseFactors = {
       'walk': 0.0,
       'cycle': 0.0,
       'motorbike': 0.113,
-      'car': 0.171,
       'bus': 0.089,
       'train': 0.041,
       'other': 0.1,
     };
-    final key = mode.toLowerCase();
-    return (emissionFactors[key] ?? 0.1) * km;
+
+    final m = mode.toLowerCase();
+    if (m == 'car') {
+      
+      const Map<String, double> carFuelFactors = {
+        'petrol': 0.192,
+        'diesel': 0.210,
+        'cng': 0.120,
+        'electric': 0.050, 
+        'hybrid': 0.110,
+        'other': 0.171,
+      };
+      final key = (vehicleFuelType ?? 'other').toLowerCase();
+      final factor = carFuelFactors[key] ?? carFuelFactors['other']!;
+      return factor * km;
+    }
+
+    final factor = baseFactors[m] ?? baseFactors['other']!;
+    return factor * km;
   }
 
-  /// --- UI helpers used by admin/dashboard screens ---
-  /// Move these out of the model if you want a purer data layer.
+
+  double get carbonKg => CommuteLog.estimateCo2Kg(distanceKm, mode, vehicleFuelType: vehicleFuelType);
+
+  
   static const Map<String, Color> modeColors = {
     'walk': Color(0xFF4CAF50),
     'cycle': Color(0xFF26A69A),
@@ -91,11 +133,11 @@ class CommuteLog {
     'other': Icons.travel_explore,
   };
 
-  /// Robust factory parsing Firestore document (handles Timestamp / num / String)
+  
   factory CommuteLog.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? <String, dynamic>{};
 
-    // Parse date (Timestamp, int (msEpoch), or ISO string)
+    
     DateTime parsedDate;
     final rawDate = data['date'];
     if (rawDate is Timestamp) {
@@ -108,14 +150,14 @@ class CommuteLog {
       parsedDate = DateTime.now();
     }
 
-    // helper to convert num -> double safely
-    double _toDouble(dynamic v) {
-      if (v == null) return 0.0;
+    
+    double _toDouble(dynamic v, {double fallback = 0.0}) {
+      if (v == null) return fallback;
       if (v is double) return v;
       if (v is int) return v.toDouble();
-      if (v is String) return double.tryParse(v) ?? 0.0;
+      if (v is String) return double.tryParse(v) ?? fallback;
       if (v is num) return v.toDouble();
-      return 0.0;
+      return fallback;
     }
 
     int? _toIntNullable(dynamic v) {
@@ -127,7 +169,18 @@ class CommuteLog {
       return null;
     }
 
-    // parse checkpoints if present (handle List<Map> or List of dynamic maps)
+    DateTime? _toDateTimeNullable(dynamic v) {
+      if (v == null) return null;
+      try {
+        if (v is Timestamp) return v.toDate();
+        if (v is DateTime) return v;
+        if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+        if (v is String) return DateTime.tryParse(v);
+      } catch (_) {}
+      return null;
+    }
+
+    
     List<Map<String, double>>? parsedCheckpoints;
     if (data['checkpoints'] is List) {
       final rawList = List.from(data['checkpoints']);
@@ -149,6 +202,13 @@ class CommuteLog {
       return null;
     }
 
+    
+    final createdAtRaw = data['createdAt'];
+    final createdAt = createdAtRaw is Timestamp ? createdAtRaw : Timestamp.now();
+
+
+    final parsedWeather = (data['weather'] as String?)?.trim() ?? 'Unknown';
+
     return CommuteLog(
       id: doc.id,
       userId: (data['userId'] ?? data['uid'] ?? '') as String,
@@ -157,48 +217,62 @@ class CommuteLog {
       distanceKm: _toDouble(data['distanceKm']),
       productivityScore: _toDouble(data['productivityScore']),
       durationMinutes: _toIntNullable(data['durationMinutes']),
-      cost: data['cost'] != null ? _toDouble(data['cost']) : null,
+      durationSeconds: _toIntNullable(data['durationSeconds']),
+      cost: data['cost'] != null ? _toDouble(data['cost'], fallback: 0.0) : null,
+      totalCost: data['totalCost'] != null
+          ? _toDouble(data['totalCost'], fallback: 0.0)
+          : (data['cost'] != null ? _toDouble(data['cost'], fallback: 0.0) : 0.0),
       startLocation: _mapFromDynamic(data['startLocation']),
       endLocation: _mapFromDynamic(data['endLocation']),
       startAddress: data['startAddress'] as String?,
       endAddress: data['endAddress'] as String?,
-      fatigueLevel:
-          data['fatigueLevel'] != null ? _toDouble(data['fatigueLevel']) : null,
-      stressLevel:
-          data['stressLevel'] != null ? _toDouble(data['stressLevel']) : null,
+      startTime: _toDateTimeNullable(data['startTime']),
+      endTime: _toDateTimeNullable(data['endTime']),
+      vehicleFuelType: (data['vehicleFuelType'] as String?)?.toLowerCase(),
+      fatigueLevel: _toDouble(data['fatigueLevel'], fallback: 0.0),
+      stressLevel: _toDouble(data['stressLevel'], fallback: 0.0),
       physicalActivity:
           data['physicalActivity'] != null ? _toDouble(data['physicalActivity']) : null,
       numberOfCommuters: _toIntNullable(data['numberOfCommuters']),
       missedDeadlines: data['missedDeadlines'] as String?,
       checkpoints: parsedCheckpoints,
       polyline: data['polyline'] as String?,
-      createdAt: data['createdAt'] is Timestamp
-          ? data['createdAt'] as Timestamp
-          : Timestamp.now(),
+      weather: parsedWeather,
+      createdAt: createdAt,
     );
   }
 
   Map<String, dynamic> toMap() {
-    return {
-      if (userId != null) 'userId': userId,
+    final map = <String, dynamic>{
+      'userId': userId,
       'date': Timestamp.fromDate(date),
       'mode': mode,
       'distanceKm': distanceKm,
       'productivityScore': productivityScore,
-      if (durationMinutes != null) 'durationMinutes': durationMinutes,
-      if (cost != null) 'cost': cost,
-      if (startLocation != null) 'startLocation': startLocation,
-      if (endLocation != null) 'endLocation': endLocation,
-      if (startAddress != null) 'startAddress': startAddress,
-      if (endAddress != null) 'endAddress': endAddress,
-      if (fatigueLevel != null) 'fatigueLevel': fatigueLevel,
-      if (stressLevel != null) 'stressLevel': stressLevel,
-      if (physicalActivity != null) 'physicalActivity': physicalActivity,
-      if (numberOfCommuters != null) 'numberOfCommuters': numberOfCommuters,
-      if (missedDeadlines != null) 'missedDeadlines': missedDeadlines,
-      if (checkpoints != null) 'checkpoints': checkpoints,
-      if (polyline != null) 'polyline': polyline,
+      'totalCost': totalCost,
+      'weather': weather,
       'createdAt': createdAt,
     };
+
+    if (durationMinutes != null) map['durationMinutes'] = durationMinutes;
+    if (durationSeconds != null) map['durationSeconds'] = durationSeconds;
+    if (cost != null) map['cost'] = cost;
+    if (startLocation != null) map['startLocation'] = startLocation;
+    if (endLocation != null) map['endLocation'] = endLocation;
+    if (startAddress != null) map['startAddress'] = startAddress;
+    if (endAddress != null) map['endAddress'] = endAddress;
+    if (startTime != null) map['startTime'] = Timestamp.fromDate(startTime!);
+    if (endTime != null) map['endTime'] = Timestamp.fromDate(endTime!);
+    if (vehicleFuelType != null) map['vehicleFuelType'] = vehicleFuelType;
+    map['fatigueLevel'] = fatigueLevel;
+    map['stressLevel'] = stressLevel;
+
+    if (physicalActivity != null) map['physicalActivity'] = physicalActivity;
+    if (numberOfCommuters != null) map['numberOfCommuters'] = numberOfCommuters;
+    if (missedDeadlines != null) map['missedDeadlines'] = missedDeadlines;
+    if (checkpoints != null) map['checkpoints'] = checkpoints;
+    if (polyline != null) map['polyline'] = polyline;
+
+    return map;
   }
 }

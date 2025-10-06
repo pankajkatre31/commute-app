@@ -1,3 +1,4 @@
+import 'package:commute_app/main.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -57,22 +58,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   },
                 ),
                 const Divider(height: 0),
-                ListTile(
-                  leading: const Icon(Icons.email_outlined),
-                  title: const Text('Change Email'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () {
-                    // TODO: Implement email change functionality
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Email change feature coming soon!'),
-                      ),
-                    );
-                  },
-                ),
               ],
             ),
           ),
+
           const SizedBox(height: 20),
 
           // App Settings Section
@@ -110,12 +99,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ListTile(
                   leading: const Icon(Icons.dark_mode),
                   title: const Text('Dark Mode'),
-                  trailing: Switch(
-                    value: _darkModeEnabled,
-                    onChanged: (value) {
-                      setState(() {
-                        _darkModeEnabled = value;
-                      });
+                  trailing: ValueListenableBuilder<ThemeMode>(
+                    valueListenable: ThemeController.themeModeNotifier,
+                    builder: (context, mode, _) {
+                      final isDark = mode == ThemeMode.dark;
+                      return Switch(
+                        value: isDark,
+                        onChanged: (value) {
+                          // toggle & persist
+                          ThemeController.toggleDark(value);
+                        },
+                      );
                     },
                   ),
                 ),

@@ -5,13 +5,13 @@ import 'package:flutter/foundation.dart';
 @immutable
 class CommuteStats {
   final int totalTrips;
-  final double totalDistance; // in km
-  final double avgProductivity; // 0..10
-  final double totalCost; // currency units
-  final double totalCarbon; // in kg CO2
-  final double avgFatigue; // 0..10
-  final double avgStress; // 0..10
-  final double avgPhysicalActivity; // arbitrary scale
+  final double totalDistance; 
+  final double avgProductivity; 
+  final double totalCost;
+  final double totalCarbon; 
+  final double avgFatigue; 
+  final double avgStress; 
+  final double avgPhysicalActivity; 
 
   const CommuteStats({
     required this.totalTrips,
@@ -73,29 +73,4 @@ class CommuteStats {
   String toString() {
     return 'CommuteStats(totalTrips: $totalTrips, totalDistance: $totalDistance, avgProductivity: $avgProductivity, totalCost: $totalCost, totalCarbon: $totalCarbon, avgFatigue: $avgFatigue, avgStress: $avgStress, avgPhysicalActivity: $avgPhysicalActivity)';
   }
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is CommuteStats &&
-          runtimeType == other.runtimeType &&
-          totalTrips == other.totalTrips &&
-          totalDistance == other.totalDistance &&
-          avgProductivity == other.avgProductivity &&
-          totalCost == other.totalCost &&
-          totalCarbon == other.totalCarbon &&
-          avgFatigue == other.avgFatigue &&
-          avgStress == other.avgStress &&
-          avgPhysicalActivity == other.avgPhysicalActivity;
-
-  @override
-  int get hashCode =>
-      totalTrips.hashCode ^
-      totalDistance.hashCode ^
-      avgProductivity.hashCode ^
-      totalCost.hashCode ^
-      totalCarbon.hashCode ^
-      avgFatigue.hashCode ^
-      avgStress.hashCode ^
-      avgPhysicalActivity.hashCode;
 }

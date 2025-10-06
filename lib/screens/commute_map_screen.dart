@@ -1,4 +1,3 @@
-// lib/screens/commute_map_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -7,10 +6,10 @@ import 'package:google_polyline_algorithm/google_polyline_algorithm.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
-/// Defensive CommuteMapScreen: accepts `dynamic log` (model or Map) and probes fields safely.
+
 class CommuteMapScreen extends StatefulWidget {
-  final dynamic log; // accept dynamic to avoid cross-import CommuteLog identity errors
-  /// Optional: pass API key explicitly (recommended). If null, falls back to String.fromEnvironment.
+  final dynamic log; 
+  
   final String? googleApiKey;
 
   const CommuteMapScreen({Key? key, required this.log, this.googleApiKey}) : super(key: key);

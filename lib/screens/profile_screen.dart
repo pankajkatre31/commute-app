@@ -3,10 +3,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
-// single, canonical import for the model
 import '../models/commute_log.dart';
 import '../models/commute_stats.dart';
-
+import 'package:commute_app/screens/vehicle_settings_screen.dart';
 class ProfileScreen extends StatefulWidget {
   final String userId;
   final String? userEmail;
@@ -26,6 +25,11 @@ class _ProfileScreenState extends State<ProfileScreen>
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   bool _isEditing = false;
+
+  // --- NEW: fuel type state + options ---
+  final List<String> _fuelOptions = ['petrol', 'diesel', 'cng', 'electric', 'hybrid', 'other'];
+  String? _selectedFuelType;
+  bool _isLoadingProfile = true;
 
   @override
   void initState() {
@@ -57,6 +61,9 @@ class _ProfileScreenState extends State<ProfileScreen>
     Future.delayed(const Duration(milliseconds: 200), () {
       _slideController.forward();
     });
+
+    // load saved profile (including vehicleFuelType)
+    _loadProfile();
   }
 
   @override
@@ -66,66 +73,140 @@ class _ProfileScreenState extends State<ProfileScreen>
     _slideController.dispose();
     super.dispose();
   }
+Future<void> _loadProfile() async {
+  if (!mounted) return;
+  setState(() {
+    _isLoadingProfile = true;
+  });
 
-  Future<void> _updateProfile() async {
-    if (!_formKey.currentState!.validate()) return;
+  try {
+    // Prefer the authenticated user's uid to avoid mismatches.
+    final authUid = FirebaseAuth.instance.currentUser?.uid;
+    final uid = authUid ?? widget.userId;
+    if (uid == null) {
+      debugPrint('ProfileScreen._loadProfile: no uid available');
+      setState(() => _isLoadingProfile = false);
+      return;
+    }
 
-    // Show loading state
-    setState(() => _isEditing = false);
+    debugPrint('ProfileScreen._loadProfile: reading users/$uid');
+    final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+    final doc = await docRef.get();
 
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user != null) {
-        await user.updateProfile(displayName: _nameController.text);
+    if (!doc.exists) {
+      debugPrint('ProfileScreen._loadProfile: users/$uid does not exist');
+    }
 
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.check_circle, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Text(
-                    'Profile updated successfully!',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-              backgroundColor: Colors.green,
-              behavior: SnackBarBehavior.floating,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-          );
+    final data = doc.data();
+    if (mounted) {
+      setState(() {
+        _selectedFuelType = data != null && data['vehicleFuelType'] != null
+            ? (data['vehicleFuelType'] as String).toLowerCase()
+            : null;
+
+        // if displayName missing in auth, fallback to profile doc
+        if ((FirebaseAuth.instance.currentUser?.displayName ?? '').isEmpty &&
+            data != null &&
+            data['displayName'] != null) {
+          _nameController.text = data['displayName'] as String;
         }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Failed to update: $e',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w500),
-                  ),
-                ),
-              ],
-            ),
-            backgroundColor: Colors.red,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        );
+
+        _isLoadingProfile = false;
+      });
+    }
+
+    // debug: print the doc contents to console
+    debugPrint('Profile doc for $uid -> ${data ?? '<empty>'}');
+  } catch (e, st) {
+    debugPrint('ProfileScreen._loadProfile ERROR: $e\n$st');
+    if (mounted) setState(() => _isLoadingProfile = false);
+  }
+}
+void _showSnack(String message, {bool isError = false}) {
+  if (!mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Row(
+        children: [
+          Icon(isError ? Icons.error : Icons.check_circle, color: Colors.white),
+          const SizedBox(width: 8),
+          Expanded(child: Text(message, style: GoogleFonts.poppins())),
+        ],
+      ),
+      backgroundColor: isError ? Colors.red : Colors.green,
+      behavior: SnackBarBehavior.floating,
+    ),
+  );
+}
+Future<void> _updateProfile() async {
+  // If the name form is present, validate it; otherwise skip validation.
+  final formState = _formKey.currentState;
+  if (formState != null) {
+    if (!formState.validate()) return;
+    // optionally save: formState.save();
+  }
+
+  // disable editing UI immediately
+  setState(() => _isEditing = false);
+
+  try {
+    final user = FirebaseAuth.instance.currentUser;
+    final authUid = user?.uid;
+    final uid = authUid ?? widget.userId;
+
+    if (uid == null) {
+      _showSnack('Unable to save profile (no user id)', isError: true);
+      return;
+    }
+
+    // Try to update the Auth displayName if an auth user exists
+    if (user != null) {
+      try {
+        // NOTE: updateProfile may be deprecated on some SDKs; keep this best-effort.
+        await user.updateProfile(displayName: _nameController.text.trim());
+        await user.reload();
+      } catch (e) {
+        debugPrint('Profile: failed to update auth displayName (non-fatal): $e');
       }
     }
+
+    // Prepare payload for Firestore (merge so we don't overwrite other fields)
+    final payload = <String, dynamic>{
+      'displayName': _nameController.text.trim(),
+      if (_selectedFuelType != null) 'vehicleFuelType': _selectedFuelType,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+
+    debugPrint('ProfileScreen._updateProfile: writing users/$uid -> $payload');
+
+    final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+    await docRef.set(payload, SetOptions(merge: true));
+
+    // Re-read to confirm write and update UI
+    final fresh = await docRef.get();
+    final freshData = fresh.data();
+    debugPrint('ProfileScreen._updateProfile: saved. freshData=$freshData');
+
+    if (mounted) {
+      setState(() {
+        _selectedFuelType = freshData != null && freshData['vehicleFuelType'] != null
+            ? (freshData['vehicleFuelType'] as String).toLowerCase()
+            : _selectedFuelType;
+        // Also sync name from saved doc if auth wasn't updated
+        if ((FirebaseAuth.instance.currentUser?.displayName ?? '').isEmpty &&
+            freshData != null &&
+            freshData['displayName'] != null) {
+          _nameController.text = freshData['displayName'] as String;
+        }
+      });
+
+      _showSnack('Profile updated successfully', isError: false);
+    }
+  } catch (e, st) {
+    debugPrint('ProfileScreen._updateProfile ERROR: $e\n$st');
+    if (mounted) _showSnack('Failed to update profile: $e', isError: true);
   }
+}
 
   Stream<List<CommuteLog>> _getLogsStream() {
     return FirebaseFirestore.instance
@@ -134,10 +215,8 @@ class _ProfileScreenState extends State<ProfileScreen>
         .orderBy('date', descending: true)
         .snapshots()
         .map((snapshot) {
-          return snapshot.docs
-              .map((doc) => CommuteLog.fromFirestore(doc))
-              .toList();
-        });
+      return snapshot.docs.map((doc) => CommuteLog.fromFirestore(doc)).toList();
+    });
   }
 
   CommuteStats _calculateStats(List<CommuteLog> logs) {
@@ -193,16 +272,22 @@ class _ProfileScreenState extends State<ProfileScreen>
   }
 
   double _calculateCarbonForLog(CommuteLog log) {
-    const Map<String, double> emissionFactors = {
-      'walk': 0.0,
-      'cycle': 0.0,
-      'motorbike': 0.113,
-      'car': 0.171,
-      'bus': 0.089,
-      'train': 0.041,
-      'other': 0.1,
-    };
-    return (emissionFactors[log.mode] ?? 0.1) * log.distanceKm;
+    // Prefer model's estimate if available and supports vehicleFuelType
+    try {
+      // If your CommuteLog provides an estimate method / getter, use it:
+      return log.carbonKg;
+    } catch (_) {
+      const Map<String, double> emissionFactors = {
+        'walk': 0.0,
+        'cycle': 0.0,
+        'motorbike': 0.113,
+        'car': 0.171,
+        'bus': 0.089,
+        'train': 0.041,
+        'other': 0.1,
+      };
+      return (emissionFactors[log.mode] ?? 0.1) * log.distanceKm;
+    }
   }
 
   @override
@@ -211,35 +296,32 @@ class _ProfileScreenState extends State<ProfileScreen>
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      body: StreamBuilder<User?>(
-        stream: FirebaseAuth.instance.authStateChanges(),
-        builder: (context, userSnapshot) {
-          final user = userSnapshot.data;
-          return CustomScrollView(
-            slivers: [
-              _buildSliverAppBar(user),
-              SliverToBoxAdapter(
-                child: FadeTransition(
-                  opacity: _fadeAnimation,
-                  child: SlideTransition(
-                    position: _slideAnimation,
-                    child: Column(
-                      children: [
-                        _buildProfileCard(user),
-                        const SizedBox(height: 20),
-                        _buildAccountDetails(),
-                        const SizedBox(height: 20),
-                        _buildCommuteInsights(),
-                        const SizedBox(height: 32),
-                      ],
-                    ),
+      body: StreamBuilder<User?>(stream: FirebaseAuth.instance.authStateChanges(), builder: (context, userSnapshot) {
+        final user = userSnapshot.data;
+        return CustomScrollView(
+          slivers: [
+            _buildSliverAppBar(user),
+            SliverToBoxAdapter(
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: SlideTransition(
+                  position: _slideAnimation,
+                  child: Column(
+                    children: [
+                      _buildProfileCard(user),
+                      const SizedBox(height: 20),
+                      _buildAccountDetails(),
+                      const SizedBox(height: 20),
+                      _buildCommuteInsights(),
+                      const SizedBox(height: 32),
+                    ],
                   ),
                 ),
               ),
-            ],
-          );
-        },
-      ),
+            ),
+          ],
+        );
+      }),
     );
   }
 
@@ -639,6 +721,85 @@ class _ProfileScreenState extends State<ProfileScreen>
                 value: widget.userEmail ?? 'Not provided',
                 color: Colors.blue,
               ),
+              const SizedBox(height: 16),
+
+               
+if (_isLoadingProfile)
+  const Center(child: CircularProgressIndicator())
+else
+  Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Text(
+        'Vehicle / Fuel Type',
+        style: GoogleFonts.poppins(
+          fontSize: 12,
+          color: Colors.grey[600],
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      const SizedBox(height: 8),
+
+  
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.withOpacity(0.15)),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.local_gas_station, size: 18),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                _selectedFuelType != null ? _selectedFuelType!.toUpperCase() : 'Not set',
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Theme.of(context).colorScheme.onSurface,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+
+      const SizedBox(height: 12),
+
+      
+      Row(
+        children: [
+          Expanded(
+            child: ElevatedButton.icon(
+          onPressed: () async {
+  final result = await Navigator.push<String?>(
+    context,
+    MaterialPageRoute(builder: (_) => const VehicleSettingsScreen()),
+  );
+
+  if (!mounted) return;
+
+  if (result != null && result.isNotEmpty) {
+    setState(() {
+      _selectedFuelType = result.toLowerCase();
+    });
+  } else {
+    
+    await _loadProfile();
+  }
+},
+
+              icon: const Icon(Icons.car_rental),
+              label: Text('Manage Vehicles', style: GoogleFonts.poppins()),
+            ),
+          ),
+        ],
+      ),
+    ],
+
+  ),
             ],
           ),
         ),
@@ -757,8 +918,7 @@ class _ProfileScreenState extends State<ProfileScreen>
                         ),
                         child: Icon(
                           Icons.analytics,
-                          color:
-                              Theme.of(context).colorScheme.onPrimaryContainer,
+                          color: Theme.of(context).colorScheme.onPrimaryContainer,
                           size: 24,
                         ),
                       ),
@@ -1015,9 +1175,7 @@ class _ProfileScreenState extends State<ProfileScreen>
 
     final modeProductivity = <String, List<double>>{};
     for (final log in logs) {
-      modeProductivity
-          .putIfAbsent(log.mode, () => [])
-          .add(log.productivityScore);
+      modeProductivity.putIfAbsent(log.mode, () => []).add(log.productivityScore);
     }
 
     String bestMode = 'None';

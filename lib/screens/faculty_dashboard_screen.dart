@@ -1,4 +1,3 @@
-// faculty_dashboard_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -13,10 +12,9 @@ import 'add_commute_log_screen.dart';
 import 'package:commute_app/screens/commute_map_screen.dart';
 import 'profile_screen.dart';
 import 'settings_screen.dart';
-// top of faculty_dashboard_screen.dart
 import 'package:commute_app/models/commute_log.dart';
 import 'package:commute_app/widgets/inline_map_tracker.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart'; // for LatLng
+import 'package:google_maps_flutter/google_maps_flutter.dart'; 
 
 class CommuteStats {
   final int totalTrips;
@@ -109,7 +107,7 @@ class _FacultyDashboardScreenState extends State<FacultyDashboardScreen>
     'other',
   ];
 
-  // --- ADDED: route/tracking state used by InlineMapTracker ---
+
   LatLng? _start;
   LatLng? _end;
   List<LatLng> _routePoints = [];
@@ -117,13 +115,18 @@ class _FacultyDashboardScreenState extends State<FacultyDashboardScreen>
   bool _showTripDetails = false;
   bool _isTracking = false;
   int? _durationSeconds;
-// helper to format seconds -> HH:MM:SS
-String _formatSecondsToHms(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
-}
+
+
+  DateTime? _tripStartTime;
+  DateTime? _tripEndTime;
+
+
+  String _formatSecondsToHms(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
 
   @override
   void initState() {
@@ -166,47 +169,62 @@ String _formatSecondsToHms(int seconds) {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isSubmitting = true);
 
-  try {
-  // Basic sanity checks
-  if (_distanceController.text.trim().isEmpty) {
-    _showErrorMessage('Please provide distance before saving the log.');
-    return;
-  }
-  if (_productivityController.text.trim().isEmpty) {
-    _showErrorMessage('Please provide a productivity score before saving the log.');
-    return;
-  }
+    try {
+    
+      if (_distanceController.text.trim().isEmpty) {
+        _showErrorMessage('Please provide distance before saving the log.');
+        return;
+      }
+      if (_productivityController.text.trim().isEmpty) {
+        _showErrorMessage('Please provide a productivity score before saving the log.');
+        return;
+      }
 
-  final distanceKm = double.tryParse(_distanceController.text);
-  final productivityScore = double.tryParse(_productivityController.text);
+      final distanceKm = double.tryParse(_distanceController.text);
+      final productivityScore = double.tryParse(_productivityController.text);
 
-  if (distanceKm == null || productivityScore == null) {
-    _showErrorMessage('Distance or productivity score is invalid.');
-    return;
+      if (distanceKm == null || productivityScore == null) {
+        _showErrorMessage('Distance or productivity score is invalid.');
+        return;
+      }
+
+String? userFuelType;
+try {
+  final uid = FirebaseAuth.instance.currentUser?.uid ?? widget.userId;
+  if (uid != null) {
+    final profileSnap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+    final pd = profileSnap.data();
+    if (pd != null && pd['vehicleFuelType'] != null) {
+      userFuelType = (pd['vehicleFuelType'] as String).toLowerCase();
+    }
   }
+} catch (_) {
+  userFuelType = null;
+}
 
-  final logData = {
-    'userId': widget.userId,
-    'date': Timestamp.fromDate(
-      DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day),
-    ),
-    'mode': _selectedMode,
-    'distanceKm': distanceKm,
-    'productivityScore': productivityScore,
-    'durationMinutes':
-        _durationController.text.isNotEmpty ? int.tryParse(_durationController.text) : null,
-    'durationSeconds': _durationSeconds, // authoritative exact seconds (may be null)
-    'cost': _costController.text.isNotEmpty ? double.tryParse(_costController.text) : null,
-    'fatigueLevel':
-        _fatigueController.text.isNotEmpty ? double.tryParse(_fatigueController.text) : null,
-    'stressLevel':
-        _stressController.text.isNotEmpty ? double.tryParse(_stressController.text) : null,
-    'startLocation': _start != null ? {'lat': _start!.latitude, 'lng': _start!.longitude} : null,
-    'endLocation': _end != null ? {'lat': _end!.latitude, 'lng': _end!.longitude} : null,
-    'checkpoints': _routePoints.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
-    'distanceComputedKm': _distanceKm,
-    'createdAt': FieldValue.serverTimestamp(),
-  };
+
+final logData = {
+  'userId': widget.userId,
+  'date': Timestamp.fromDate(DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day)),
+  'mode': _selectedMode,
+  'distanceKm': distanceKm,
+  'productivityScore': productivityScore,
+  'durationMinutes': _durationController.text.isNotEmpty ? int.tryParse(_durationController.text) : null,
+  'durationSeconds': _durationSeconds,
+  'cost': _costController.text.isNotEmpty ? double.tryParse(_costController.text) : null,
+  'fatigueLevel': _fatigueController.text.isNotEmpty ? double.tryParse(_fatigueController.text) : null,
+  'stressLevel': _stressController.text.isNotEmpty ? double.tryParse(_stressController.text) : null,
+  'startLocation': _start != null ? {'lat': _start!.latitude, 'lng': _start!.longitude} : null,
+  'endLocation': _end != null ? {'lat': _end!.latitude, 'lng': _end!.longitude} : null,
+  'checkpoints': _routePoints.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
+  'distanceComputedKm': _distanceKm,
+  'startTime': _start != null && _durationSeconds != null
+      ? Timestamp.fromDate(DateTime.now().subtract(Duration(seconds: _durationSeconds!)))
+      : null, 
+  'endTime': _durationSeconds != null ? Timestamp.fromDate(DateTime.now()) : null, // prefer actual times if you have them
+  'vehicleFuelType': userFuelType,
+  'createdAt': FieldValue.serverTimestamp(),
+};
 
 
       await FirebaseFirestore.instance.collection('commute_logs').add(logData);
@@ -218,289 +236,83 @@ String _formatSecondsToHms(int seconds) {
       if (mounted) setState(() => _isSubmitting = false);
     }
   }
-void _resetForm() {
-  _distanceController.clear();
-  _productivityController.clear();
-  _costController.clear();
-  _durationController.clear();
-  _fatigueController.clear();
-  _stressController.clear();
-  setState(() {
-    _selectedMode = 'walk';
-    _selectedDate = DateTime.now();
-    _showAdvancedFields = false;
-    _start = null;
-    _end = null;
-    _routePoints = [];
-    _distanceKm = null;
-    _showTripDetails = false;
-    _durationSeconds = null; // reset authoritative seconds
-  });
-}
 
-Future<void> _showTripReviewSheet({
-  required LatLng start,
-  required LatLng end,
-  required List<LatLng> routePoints,
-  required double distanceKm,
-  
-}) async {
-  // Pre-fill distance
-  _distanceController.text = distanceKm.toStringAsFixed(2);
+  void _resetForm() {
+    _distanceController.clear();
+    _productivityController.clear();
+    _costController.clear();
+    _durationController.clear();
+    _fatigueController.clear();
+    _stressController.clear();
+    setState(() {
+      _selectedMode = 'walk';
+      _selectedDate = DateTime.now();
+      _showAdvancedFields = false;
+      _start = null;
+      _end = null;
+      _routePoints = [];
+      _distanceKm = null;
+      _showTripDetails = false;
+      _durationSeconds = null; 
+      _tripStartTime = null;
+      _tripEndTime = null;
+    });
+  }
 
-  // Local controllers for the sheet (start with main controllers' values)
-  final TextEditingController tmpProductivity = TextEditingController(text: _productivityController.text);
-  final TextEditingController tmpDuration = TextEditingController(text: _durationController.text);
-  final TextEditingController tmpCost = TextEditingController(text: _costController.text);
-  final TextEditingController tmpFatigue = TextEditingController(text: _fatigueController.text);
-  final TextEditingController tmpStress = TextEditingController(text: _stressController.text);
+  Future<void> _showTripReviewSheet({
+    required LatLng start,
+    required LatLng end,
+    required List<LatLng> routePoints,
+    required double distanceKm,
+    required int durationSeconds,
+    required DateTime startTime,
+    required DateTime endTime,
+  }) async {
+    
+    _distanceController.text = distanceKm.toStringAsFixed(2);
 
-  // New controllers for the walk/cycle extra questions
-  final TextEditingController tmpMood = TextEditingController();
-  final TextEditingController tmpTrack = TextEditingController();
-  final TextEditingController tmpWeather = TextEditingController();
+    final chosenMode = _selectedMode;
+    
+    final result = await showModalBottomSheet<Map<String, String>?>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => TripReviewSheet(
+        chosenMode: chosenMode,
+        distanceKm: distanceKm,
+        durationSeconds: durationSeconds,
+        startTime: startTime,
+        endTime: endTime,
+        initialProductivity: _productivityController.text,
+        initialDurationText: _durationController.text,
+        initialCost: _costController.text,
+        initialFatigue: _fatigueController.text,
+        initialStress: _stressController.text,
+      ),
+    );
 
-  // Use the mode that was selected BEFORE starting the trip (from your screen state)
-  String chosenMode = _selectedMode;
+    
+    if (result != null && mounted) {
+      setState(() {
+        _selectedMode = chosenMode;
+        _productivityController.text = result['productivity'] ?? '';
+        _durationController.text = result['duration'] ?? '';
+        _costController.text = result['cost'] ?? '';
+        _fatigueController.text = result['fatigue'] ?? '';
+        _stressController.text = result['stress'] ?? '';
+        _distanceController.text = distanceKm.toStringAsFixed(2);
 
-  // Field visibility helpers
-  bool showCost() =>
-      (chosenMode == 'motorbike' || chosenMode == 'car' || chosenMode == 'bus' || chosenMode == 'train' || chosenMode == 'other');
-  bool showFatigueStress() =>
-      (chosenMode == 'walk' || chosenMode == 'cycle' || chosenMode == 'motorbike' || chosenMode == 'car' || chosenMode == 'other');
-  bool showDuration() => true;
-  bool showProductivity() => true;
-  bool showWalkCycleExtras() => (chosenMode == 'walk' || chosenMode == 'cycle');
+        
+        _tripStartTime = startTime;
+        _tripEndTime = endTime;
+        _durationSeconds = durationSeconds;
+      });
 
-  await showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (context) {
-      return Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-        child: DraggableScrollableSheet(
-          initialChildSize: 0.6,
-          minChildSize: 0.4,
-          maxChildSize: 0.95,
-          builder: (context, scrollController) => SingleChildScrollView(
-            controller: scrollController,
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text('Trip review', style: GoogleFonts.poppins(textStyle: Theme.of(context).textTheme.titleLarge)),
-                const SizedBox(height: 8),
-                Text('Distance: ${distanceKm.toStringAsFixed(2)} km', style: GoogleFonts.poppins()),
-                const SizedBox(height: 12),
-
-                // Show chosen mode (no chips to change it)
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: modeColors[chosenMode]?.withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: modeColors[chosenMode] ?? Colors.grey),
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(modeIcons[chosenMode], color: modeColors[chosenMode]),
-                          const SizedBox(width: 8),
-                          Text(chosenMode.toUpperCase(), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text('Mode selected before trip', style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12)),
-                  ],
-                ),
-
-                const SizedBox(height: 18),
-
-                StatefulBuilder(builder: (context, setModalState) {
-                  return Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (showProductivity()) ...[
-                        Text('Productivity Score (0-10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpProductivity,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. 7.5',
-                            prefixIcon: Icon(Icons.trending_up),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-      if (showDuration()) ...[
-  Text('Duration (HH:MM:SS)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-  const SizedBox(height: 6),
-  TextFormField(
-    controller: TextEditingController(
-      text: _durationSeconds != null
-          ? _formatSecondsToHms(_durationSeconds!)
-          : (tmpDuration.text.isNotEmpty ? tmpDuration.text : ''),
-    ),
-    readOnly: true,
-    decoration: const InputDecoration(
-      prefixIcon: Icon(Icons.access_time),
-    ),
-  ),
-  const SizedBox(height: 12),
-],
-                      if (showCost()) ...[
-                        Text('Cost (₹)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpCost,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. 40.5',
-                            prefixIcon: Icon(Icons.currency_rupee),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      if (showWalkCycleExtras()) ...[
-                        // Mood
-                        Text('How was your mood?', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpMood,
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. Happy, calm, stressed',
-                            prefixIcon: Icon(Icons.emoji_emotions_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Track (route description)
-                        Text('What was the track?', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpTrack,
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. Short route via river road, lots of traffic',
-                            prefixIcon: Icon(Icons.alt_route_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        // Weather
-                        Text('How was the weather?', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpWeather,
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. Sunny, cloudy, rainy',
-                            prefixIcon: Icon(Icons.wb_sunny_outlined),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      if (showFatigueStress()) ...[
-                        Text('Fatigue Level (0-10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpFatigue,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. 3.0',
-                            prefixIcon: Icon(Icons.battery_alert),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-
-                        Text('Stress Level (0-10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-                        const SizedBox(height: 6),
-                        TextFormField(
-                          controller: tmpStress,
-                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                          decoration: const InputDecoration(
-                            hintText: 'e.g. 2.0',
-                            prefixIcon: Icon(Icons.psychology),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                      ],
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton(
-                              onPressed: () {
-                                Navigator.pop(context); // cancel
-                              },
-                              child: const Text('Cancel'),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: FilledButton(
-                              onPressed: () async {
-                                // copy modal values back to screen-level controllers/state
-                                setState(() {
-                                  _selectedMode = chosenMode;
-                                  _productivityController.text = tmpProductivity.text;
-                                  _durationController.text = tmpDuration.text;
-                                  _costController.text = tmpCost.text;
-                                  _fatigueController.text = tmpFatigue.text;
-                                  _stressController.text = tmpStress.text;
-                                  _distanceController.text = distanceKm.toStringAsFixed(2);
-
-                                  // store walk/cycle extras into new state fields (or reuse controllers)
-                                  // We'll reuse controllers by saving text into them (or you may add dedicated variables)
-                                });
- // dispose temporary controllers
-  tmpProductivity.dispose();
-  tmpDuration.dispose();
-  tmpCost.dispose();
-  tmpFatigue.dispose();
-  tmpStress.dispose();
-  tmpMood.dispose();
-  tmpTrack.dispose();
-  tmpWeather.dispose();
-
-  Navigator.pop(context);
-  await _submitLog();
-},
-                                // Optionally save extras into Firestore via _submitLog
-                                // To save mood/track/weather, update _submitLog to include these fields
-                                
-                              child: const Text('Save Log'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  );
-                }),
-              ],
-            ),
-          ),
-        ),
-      );
-    },
-  );
-}
-
-
+      await _submitLog();
+    }
+  }
 
   void _showSuccessMessage(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -565,18 +377,17 @@ Future<void> _showTripReviewSheet({
   Stream<List<CommuteLog>> _getLogsStream({bool allUsers = false}) {
     Query<Map<String, dynamic>> query;
 
-    // if you saved logs in 'commute_logs' as a flat collection:
+    
     query = FirebaseFirestore.instance.collection('commute_logs').orderBy('date', descending: true);
 
-    // If you saved logs under users/{uid}/trips, use collectionGroup:
-    // query = FirebaseFirestore.instance.collectionGroup('trips').orderBy('date', descending: true);
+    
 
     if (!allUsers) {
-      // show only current user's logs
+      
       query = query.where('userId', isEqualTo: widget.userId);
     }
 
-    // date range / custom range filtering
+    
     if (_customDateRange != null) {
       query = query
           .where('date', isGreaterThanOrEqualTo: Timestamp.fromDate(_customDateRange!.start))
@@ -597,118 +408,118 @@ Future<void> _showTripReviewSheet({
     });
   }
 
-  // -----------------------
-  // New helper that composes InlineMapTracker + add form
-// Replace the whole _buildAddLogTabWithTracker() with this:
-Widget _buildAddLogTabWithTracker() {
-  return Stack(
-    children: [
-      Column(
-        children: [
-    InlineMapTracker(
-  height: 300,
-  onTripStarted: () {
-    setState(() {
-      _isTracking = true;
-      _screenLocked = false;
-    });
-  },
-  onTripEnded: () {
-    setState(() {
-      _isTracking = false;
-      _screenLocked = false;
-    });
-  },
-  onRouteFinished: ({
-    required LatLng start,
-    required LatLng end,
-    required List<LatLng> routePoints,
-    required double distanceKm,
-    required int durationSeconds,
-  }) {
-    // save authoritative values into state
-    setState(() {
-      _start = start;
-      _end = end;
-      _routePoints = routePoints;
-      _distanceKm = distanceKm;
-      _showTripDetails = true;
-      _isTracking = false;
-      _durationSeconds = durationSeconds; // <-- set state field (not local var)
-    });
+  Widget _buildAddLogTabWithTracker() {
+    return Stack(
+      children: [
+        Column(
+          children: [
+            InlineMapTracker(
+              height: 360,
+              onTripStarted: () => setState(() {
+                _isTracking = true;
+                
+                _tripStartTime = DateTime.now();
+              }),
+              onTripEnded: () => setState(() {
+                _isTracking = false;
+                
+                _tripEndTime = DateTime.now();
+              }),
+              onRouteFinished: ({
+                required LatLng start,
+                required LatLng end,
+                required List<LatLng> routePoints,
+                required double distanceKm,
+                required int durationSeconds,
+                required DateTime startTime,
+                required DateTime endTime,
+              }) {
+                setState(() {
+                  _start = start;
+                  _end = end;
+                  _routePoints = routePoints;
+                  _distanceKm = distanceKm;
+                  _durationSeconds = durationSeconds;
+                  _tripStartTime = startTime;
+                  _tripEndTime = endTime;
+                  _showTripDetails = true;
+                  _isTracking = false;
+                });
 
-    // fill distance controller (display in km)
-    _distanceController.text = distanceKm.toStringAsFixed(2);
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => AddCommuteLogScreen(
+                      startLat: start.latitude,
+                      startLng: start.longitude,
+                      endLat: end.latitude,
+                      endLng: end.longitude,
+                      routePoints: routePoints,
+                      distanceKm: distanceKm,
+                      durationSeconds: durationSeconds,
+                      startTime: startTime,
+                      endTime: endTime,
+                      selectedMode: _selectedMode, 
+                    ),
+                  ),
+                );
+              },
+            ),
 
-    // optional: put numeric seconds in durationController for backward compatibility (not editable authoritative)
-    _durationController.text = durationSeconds.toString();
+            const SizedBox(height: 12),
 
-    // show review modal (it will display read-only HH:MM:SS from _durationSeconds)
-    _showTripReviewSheet(
-      start: start,
-      end: end,
-      routePoints: routePoints,
-      distanceKm: distanceKm,
-    );
-  },
-),
-
-
-          const SizedBox(height: 12),
-
-          // The inputs/form area below the map
-          Expanded(
-            child: AbsorbPointer(
-              // AbsorbPointer here will block the form when _screenLocked is true.
-              absorbing: _screenLocked,
-              child: _AddLogTab(
-                formKey: _formKey,
-                distanceController: _distanceController,
-                productivityController: _productivityController,
-                costController: _costController,
-                durationController: _durationController,
-                fatigueController: _fatigueController,
-                stressController: _stressController,
-                selectedMode: _selectedMode,
-                onModeChanged: (mode) => setState(() => _selectedMode = mode),
-                selectedDate: _selectedDate,
-                onDateSelected: (date) => setState(() => _selectedDate = date),
-                showAdvancedFields: _showAdvancedFields,
-                onToggleAdvanced: (value) => setState(() => _showAdvancedFields = value),
-                transportModes: _transportModes,
+            
+            Expanded(
+              child: AbsorbPointer(
+                // AbsorbPointer here will block the form when _screenLocked is true.
+                absorbing: _screenLocked,
+                child: _AddLogTab(
+                  formKey: _formKey,
+                  distanceController: _distanceController,
+                  productivityController: _productivityController,
+                  costController: _costController,
+                  durationController: _durationController,
+                  fatigueController: _fatigueController,
+                  stressController: _stressController,
+                  selectedMode: _selectedMode,
+                  onModeChanged: (mode) => setState(() => _selectedMode = mode),
+                  selectedDate: _selectedDate,
+                  onDateSelected: (date) => setState(() => _selectedDate = date),
+                  showAdvancedFields: _showAdvancedFields,
+                  onToggleAdvanced: (value) => setState(() => _showAdvancedFields = value),
+                  transportModes: _transportModes,
+                ),
               ),
             ),
-          ),
-        ],
-      ),
-
-      // Dim overlay when screen is locked — placed before lock button so lock still receives taps
-      if (_screenLocked)
-        const Positioned.fill(
-          child: ModalBarrier(
-            dismissible: false,
-            color: Colors.black54,
-          ),
+          ],
         ),
 
-      // Lock/Unlock button: shown only when tracking
-      if (_isTracking)
-        Positioned(
-          top: 16,
-          right: 16,
-          child: FloatingActionButton.small(
-            heroTag: "lockBtn",
-            backgroundColor: _screenLocked ? Colors.red : Colors.green,
-            onPressed: () {
-              debugPrint('Lock FAB tapped — toggling _screenLocked (was: $_screenLocked)');
-              setState(() => _screenLocked = !_screenLocked);
-            },
-            child: Icon(_screenLocked ? Icons.lock : Icons.lock_open),
+        // Dim overlay when screen is locked — placed before lock button so lock still receives taps
+        if (_screenLocked)
+          const Positioned.fill(
+            child: ModalBarrier(
+              dismissible: false,
+              color: Colors.black54,
+            ),
           ),
-        ),
-    ],
-  );
-}
+
+    
+        if (_isTracking)
+          Positioned(
+            top: 16,
+            right: 16,
+            child: FloatingActionButton.small(
+              heroTag: "lockBtn",
+              backgroundColor: _screenLocked ? Colors.red : Colors.green,
+              onPressed: () {
+                debugPrint('Lock FAB tapped — toggling _screenLocked (was: $_screenLocked)');
+                setState(() => _screenLocked = !_screenLocked);
+              },
+              child: Icon(_screenLocked ? Icons.lock : Icons.lock_open),
+            ),
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -720,7 +531,7 @@ Widget _buildAddLogTabWithTracker() {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Faculty Dashboard',
+              'Person Dashboard',
               style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
             ),
             Text(
@@ -973,74 +784,86 @@ Widget _buildAddLogTabWithTracker() {
     }
   }
 
-  Future<void> _exportData() async {
-    var status = await Permission.storage.request();
-    if (!status.isGranted) {
-      _showErrorMessage('Permission to access storage was denied.');
+Future<void> _exportData() async {
+  var status = await Permission.storage.request();
+  if (!status.isGranted) {
+    _showErrorMessage('Permission to access storage was denied.');
+    return;
+  }
+
+  try {
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exporting data...')));
+
+    final logs = await _getLogsStream().first;
+    if (logs.isEmpty) {
+      _showSuccessMessage('No data to export.');
       return;
     }
 
-    try {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exporting data...')));
+    List<List<dynamic>> csvData = [
+      [
+        'date',
+        'mode',
+        'distanceKm',
+        'productivityScore',
+        'durationMinutes',
+        'durationSeconds',
+        'startTime',
+        'endTime',
+        'cost',
+        'fatigueLevel',
+        'stressLevel',
+        'createdAt',
+      ],
+    ];
 
-      final logs = await _getLogsStream().first;
-      if (logs.isEmpty) {
-        _showSuccessMessage('No data to export.');
-        return;
+    for (var log in logs) {
+    
+      DateTime createdAtDt;
+      if (log.createdAt == null) {
+        createdAtDt = DateTime.now();
+      } else if (log.createdAt is DateTime) {
+        createdAtDt = log.createdAt as DateTime;
+      } else {
+      
+        try {
+          createdAtDt = (log.createdAt as dynamic).toDate() as DateTime;
+        } catch (_) {
+          createdAtDt = DateTime.now();
+        }
       }
 
-      List<List<dynamic>> csvData = [
-        [
-          'date',
-          'mode',
-          'distanceKm',
-          'productivityScore',
-          'durationMinutes',
-          'cost',
-          'fatigueLevel',
-          'stressLevel',
-          'createdAt',
-        ],
-      ];
-      for (var log in logs) {
-        // compute a safe createdAt DateTime for export
-DateTime createdAtDt;
-if (log.createdAt == null) {
-  createdAtDt = DateTime.now();
-} else if (log.createdAt is DateTime) {
-  createdAtDt = log.createdAt as DateTime;
-} else {
-  // Firestore Timestamp -> convert
-  try {
-    createdAtDt = (log.createdAt as dynamic).toDate() as DateTime;
-  } catch (_) {
-    createdAtDt = DateTime.now();
-  }
-}
-csvData.add([
-  DateFormat('yyyy-MM-dd').format(log.date),
-  log.mode,
-  log.distanceKm,
-  log.productivityScore,
-  log.durationMinutes ?? '',
-  log.cost ?? '',
-  log.fatigueLevel ?? '',
-  log.stressLevel ?? '',
-  DateFormat('yyyy-MM-ddTHH:mm:ss').format(createdAtDt),
-]);
-      }
+      
+      final DateTime? startDt = log.startTime;
+      final DateTime? endDt = log.endTime;
 
-      String csv = const ListToCsvConverter().convert(csvData);
-      final directory = await getApplicationDocumentsDirectory();
-      final path = directory.path;
-      final file = File('$path/commute_logs.csv');
-      await file.writeAsString(csv);
-      _showSuccessMessage('Data exported to ${file.path}');
-    } catch (e) {
-      _showErrorMessage('Export failed: ${e.toString()}');
+      csvData.add([
+        DateFormat('yyyy-MM-dd').format(log.date),
+        log.mode,
+        log.distanceKm,
+        log.productivityScore,
+        log.durationMinutes ?? '',
+        log.durationSeconds ?? '',
+        startDt != null ? startDt.toIso8601String() : '',
+        endDt != null ? endDt.toIso8601String() : '',
+        log.cost ?? '',
+        log.fatigueLevel ?? '',
+        log.stressLevel ?? '',
+        DateFormat('yyyy-MM-ddTHH:mm:ss').format(createdAtDt),
+      ]);
     }
+
+    String csv = const ListToCsvConverter().convert(csvData);
+    final directory = await getApplicationDocumentsDirectory();
+    final path = directory.path;
+    final file = File('$path/commute_logs.csv');
+    await file.writeAsString(csv);
+    _showSuccessMessage('Data exported to ${file.path}');
+  } catch (e) {
+    _showErrorMessage('Export failed: ${e.toString()}');
   }
 }
+    }
 
 // ---------------------------------
 // D. REUSABLE WIDGETS
@@ -1133,96 +956,6 @@ class _AddLogTab extends StatelessWidget {
           const SizedBox(height: 16),
           const SizedBox(height: 16),
           const SizedBox(height: 16),
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            elevation: 4,
-            child: Column(
-              children: [
-                ListTile(
-                  leading: const Icon(Icons.tune),
-                  title: const Text('Additional Details'),
-                  subtitle: const Text('Optional fields for detailed tracking'),
-                  trailing: Switch(
-                    value: showAdvancedFields,
-                    onChanged: onToggleAdvanced,
-                  ),
-                ),
-                if (showAdvancedFields)
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        const Divider(),
-                        const SizedBox(height: 8),
-                        TextFormField(
-                          controller: durationController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            labelText: 'Duration (minutes)',
-                            prefixIcon: Icon(Icons.access_time),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: costController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Cost (₹)',
-                            prefixIcon: Icon(Icons.currency_rupee),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: fatigueController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Fatigue Level (0-10)',
-                            prefixIcon: Icon(Icons.battery_alert),
-                            helperText: '0 = No fatigue, 10 = Extremely tired',
-                          ),
-                          validator: (value) {
-                            if (value?.isNotEmpty == true) {
-                              final level = double.tryParse(value!);
-                              if (level == null || level < 0 || level > 10) {
-                                return 'Enter a level between 0 and 10';
-                              }
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 16),
-                        TextFormField(
-                          controller: stressController,
-                          keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true,
-                          ),
-                          decoration: const InputDecoration(
-                            labelText: 'Stress Level (0-10)',
-                            prefixIcon: Icon(Icons.psychology),
-                            helperText: '0 = No stress, 10 = Extremely stressed',
-                          ),
-                          validator: (value) {
-                            if (value?.isNotEmpty == true) {
-                              final level = double.tryParse(value!);
-                              if (level == null || level < 0 || level > 10) {
-                                return 'Enter a level between 0 and 10';
-                              }
-                            }
-                            return null;
-                          },
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-          ),
           const SizedBox(height: 100),
         ],
       ),
@@ -1248,31 +981,13 @@ class _AnalyticsContent extends StatelessWidget {
         avgPhysicalActivity: 0,
       );
     }
-    final totalDistance = logs.fold<double>(
-      0,
-      (sum, log) => sum + log.distanceKm,
-    );
-    final totalProductivity = logs.fold<double>(
-      0,
-      (sum, log) => sum + log.productivityScore,
-    );
+    final totalDistance = logs.fold<double>(0, (sum, log) => sum + log.distanceKm);
+    final totalProductivity = logs.fold<double>(0, (sum, log) => sum + log.productivityScore);
     final totalCost = logs.fold<double>(0, (sum, log) => sum + (log.cost ?? 0));
-    final totalCarbon = logs.fold<double>(
-      0,
-      (sum, log) => sum + _calculateCarbonForLog(log),
-    );
-    final totalFatigue = logs.fold<double>(
-      0,
-      (sum, log) => sum + (log.fatigueLevel ?? 0),
-    );
-    final totalStress = logs.fold<double>(
-      0,
-      (sum, log) => sum + (log.stressLevel ?? 0),
-    );
-    final totalPhysicalActivity = logs.fold<double>(
-      0,
-      (sum, log) => sum + (log.physicalActivity ?? 0),
-    );
+    final totalCarbon = logs.fold<double>(0, (sum, log) => sum + _calculateCarbonForLog(log));
+    final totalFatigue = logs.fold<double>(0, (sum, log) => sum + (log.fatigueLevel ?? 0));
+    final totalStress = logs.fold<double>(0, (sum, log) => sum + (log.stressLevel ?? 0));
+    final totalPhysicalActivity = logs.fold<double>(0, (sum, log) => sum + (log.physicalActivity ?? 0));
 
     return CommuteStats(
       totalTrips: logs.length,
@@ -1303,17 +1018,23 @@ class _AnalyticsContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final stats = _calculateStats(logs);
 
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        _KeyMetricsCard(stats: stats),
-        const SizedBox(height: 16),
-        _ProductivityChart(logs: logs),
-        const SizedBox(height: 16),
-        _ModeDistributionChart(logs: logs),
-        const SizedBox(height: 16),
-        _TrendAnalysisCard(logs: logs),
-      ],
+    
+    final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 96.0;
+
+    return SafeArea(
+      top: false,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding),
+        children: [
+          _KeyMetricsCard(stats: stats),
+          const SizedBox(height: 16),
+          _ProductivityChart(logs: logs),
+          const SizedBox(height: 16),
+          _ModeDistributionChart(logs: logs),
+          const SizedBox(height: 16),
+          _TrendAnalysisCard(logs: logs),
+        ],
+      ),
     );
   }
 }
@@ -1325,6 +1046,12 @@ class _KeyMetricsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    
+    final screenWidth = MediaQuery.of(context).size.width;
+    
+    final horizontalGaps = 16.0 * 2 + 12.0;
+    final tileWidth = (screenWidth - horizontalGaps) / 2;
+
     return Card(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       elevation: 4,
@@ -1340,34 +1067,14 @@ class _KeyMetricsCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              childAspectRatio: 2.5,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
+            Wrap(
+              spacing: 12,
+              runSpacing: 12,
               children: [
-                _MetricTile(
-                  'Total Trips',
-                  '${stats.totalTrips}',
-                  Icons.trip_origin,
-                ),
-                _MetricTile(
-                  'Total Distance',
-                  '${stats.totalDistance.toStringAsFixed(1)} km',
-                  Icons.straighten,
-                ),
-                _MetricTile(
-                  'Avg Productivity',
-                  '${stats.avgProductivity.toStringAsFixed(1)}/10',
-                  Icons.trending_up,
-                ),
-                _MetricTile(
-                  'Total Cost',
-                  '₹${stats.totalCost.toStringAsFixed(0)}',
-                  Icons.currency_rupee,
-                ),
+                SizedBox(width: tileWidth, child: _MetricTile('Total Trips', '${stats.totalTrips}', Icons.trip_origin)),
+                SizedBox(width: tileWidth, child: _MetricTile('Total Distance', '${stats.totalDistance.toStringAsFixed(1)} km', Icons.straighten)),
+                SizedBox(width: tileWidth, child: _MetricTile('Avg Productivity', '${stats.avgProductivity.toStringAsFixed(1)}/10', Icons.trending_up)),
+                SizedBox(width: tileWidth, child: _MetricTile('Total Cost', '₹${stats.totalCost.toStringAsFixed(0)}', Icons.currency_rupee)),
               ],
             ),
           ],
@@ -1376,6 +1083,7 @@ class _KeyMetricsCard extends StatelessWidget {
     );
   }
 }
+
 
 class _MetricTile extends StatelessWidget {
   final String title;
@@ -1386,43 +1094,57 @@ class _MetricTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(0.2),
-        borderRadius: BorderRadius.circular(8),
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: theme.colorScheme.outline.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          
+          CircleAvatar(
+            radius: 16,
+            backgroundColor: theme.colorScheme.primary.withOpacity(0.15),
+            child: Icon(
+              icon,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
+                
                 Text(
                   value,
                   style: GoogleFonts.poppins(
-                    textStyle: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSurface,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
+                const SizedBox(height: 2),
+                
                 Text(
                   title,
                   style: GoogleFonts.poppins(
-                    textStyle: TextStyle(
-                      fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
+                    fontSize: 12,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1434,6 +1156,7 @@ class _MetricTile extends StatelessWidget {
     );
   }
 }
+
 
 class _ProductivityChart extends StatelessWidget {
   final List<CommuteLog> logs;
@@ -2048,7 +1771,7 @@ class _HistoryFilters extends StatelessWidget {
               items: [
                 const DropdownMenuItem(value: 'all', child: Text('All modes')),
                 ...transportModes.map(
-                  (mode) => DropdownMenuItem(
+                      (mode) => DropdownMenuItem(
                     value: mode,
                     child: Text(mode.toUpperCase()),
                   ),
@@ -2189,6 +1912,17 @@ class _LogDetailsSheet extends StatelessWidget {
     return (emissionFactors[log.mode] ?? 0.1) * log.distanceKm;
   }
 
+  String _formatMaybe(dynamic val) {
+    if (val == null) return '-';
+    try {
+      if (val is DateTime) return DateFormat('yyyy-MM-dd HH:mm:ss').format(val);
+      if (val is Timestamp) return DateFormat('yyyy-MM-dd HH:mm:ss').format(val.toDate());
+      return val.toString();
+    } catch (e) {
+      return val.toString();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -2256,6 +1990,8 @@ class _LogDetailsSheet extends StatelessWidget {
               ),
               if (log.durationMinutes != null)
                 _DetailRow('Duration', '${log.durationMinutes} minutes'),
+              if (log.durationSeconds != null)
+                _DetailRow('Duration (sec)', '${log.durationSeconds} s'),
               if (log.cost != null)
                 _DetailRow('Cost', '₹${log.cost!.toStringAsFixed(2)}'),
               if (log.fatigueLevel != null)
@@ -2272,8 +2008,10 @@ class _LogDetailsSheet extends StatelessWidget {
                 _DetailRow('Start Address', log.startAddress!),
               if (log.endAddress != null)
                 _DetailRow('End Address', log.endAddress!),
+              _DetailRow('Start Time', _formatMaybe(log.startTime)),
+              _DetailRow('End Time', _formatMaybe(log.endTime)),
               const SizedBox(height: 24),
-                          Row(
+              Row(
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
@@ -2400,6 +2138,269 @@ class _EmptyState extends StatelessWidget {
             textAlign: TextAlign.center,
           ),
         ],
+      ),
+    );
+  }
+}
+class TripReviewSheet extends StatefulWidget {
+  final String chosenMode;
+  final double distanceKm;
+  final int? durationSeconds;
+  final DateTime? startTime;
+  final DateTime? endTime;
+  final String initialProductivity;
+  final String initialDurationText;
+  final String initialCost;
+  final String initialFatigue;
+  final String initialStress;
+
+  const TripReviewSheet({
+    Key? key,
+    required this.chosenMode,
+    required this.distanceKm,
+    this.durationSeconds,
+    this.startTime,
+    this.endTime,
+    this.initialProductivity = '',
+    this.initialDurationText = '',
+    this.initialCost = '',
+    this.initialFatigue = '',
+    this.initialStress = '',
+  }) : super(key: key);
+
+  @override
+  State<TripReviewSheet> createState() => _TripReviewSheetState();
+}
+
+class _TripReviewSheetState extends State<TripReviewSheet> {
+  late final TextEditingController tmpProductivity;
+  late final TextEditingController tmpDuration;
+  late final TextEditingController tmpCost;
+  late final TextEditingController tmpFatigue;
+  late final TextEditingController tmpStress;
+  late final TextEditingController tmpMood;
+  late final TextEditingController tmpTrack;
+  late final TextEditingController tmpWeather;
+
+  @override
+  void initState() {
+    super.initState();
+    tmpProductivity = TextEditingController(text: widget.initialProductivity);
+    tmpDuration = TextEditingController(text: widget.initialDurationText);
+    tmpCost = TextEditingController(text: widget.initialCost);
+    tmpFatigue = TextEditingController(text: widget.initialFatigue);
+    tmpStress = TextEditingController(text: widget.initialStress);
+    tmpMood = TextEditingController();
+    tmpTrack = TextEditingController();
+    tmpWeather = TextEditingController();
+
+    if (widget.durationSeconds != null && widget.durationSeconds! > 0) {
+      tmpDuration.text = _formatSecondsToHms(widget.durationSeconds!);
+    }
+  }
+
+  @override
+  void dispose() {
+    tmpProductivity.dispose();
+    tmpDuration.dispose();
+    tmpCost.dispose();
+    tmpFatigue.dispose();
+    tmpStress.dispose();
+    tmpMood.dispose();
+    tmpTrack.dispose();
+    tmpWeather.dispose();
+    super.dispose();
+  }
+
+  String _formatSecondsToHms(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  bool get _showCost =>
+      (widget.chosenMode == 'motorbike' ||
+          widget.chosenMode == 'car' ||
+          widget.chosenMode == 'bus' ||
+          widget.chosenMode == 'train' ||
+          widget.chosenMode == 'other');
+
+  bool get _showFatigueStress =>
+      (widget.chosenMode == 'walk' ||
+          widget.chosenMode == 'cycle' ||
+          widget.chosenMode == 'motorbike' ||
+          widget.chosenMode == 'car' ||
+          widget.chosenMode == 'other');
+
+  bool get _showWalkCycleExtras =>
+      (widget.chosenMode == 'walk' || widget.chosenMode == 'cycle');
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        builder: (context, scrollController) => SingleChildScrollView(
+          controller: scrollController,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 12),
+              Text('Trip review', style: GoogleFonts.poppins(textStyle: Theme.of(context).textTheme.titleLarge)),
+              const SizedBox(height: 8),
+              Text('Distance: ${widget.distanceKm.toStringAsFixed(2)} km', style: GoogleFonts.poppins()),
+              const SizedBox(height: 12),
+              
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: modeColors[widget.chosenMode]?.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: modeColors[widget.chosenMode] ?? Colors.grey),
+                    ),
+                    child: Row(children: [
+                      Icon(modeIcons[widget.chosenMode], color: modeColors[widget.chosenMode]),
+                      const SizedBox(width: 8),
+                      Text(widget.chosenMode.toUpperCase(), style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                    ]),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Mode selected before trip', style: GoogleFonts.poppins(color: Colors.grey[600], fontSize: 12)),
+                ],
+              ),
+              const SizedBox(height: 18),
+
+              // show start/end times (if provided)
+              if (widget.startTime != null || widget.endTime != null) ...[
+                if (widget.startTime != null)
+                  Text('Start: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(widget.startTime!)}', style: GoogleFonts.poppins()),
+                if (widget.endTime != null)
+                  Text('End: ${DateFormat('yyyy-MM-dd HH:mm:ss').format(widget.endTime!)}', style: GoogleFonts.poppins()),
+                const SizedBox(height: 12),
+              ],
+
+              // Inputs (same as your sheet content — shortend here for brevity)
+              Text('Productivity Score (0-10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              TextFormField(controller: tmpProductivity, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(hintText: 'e.g. 7.5', prefixIcon: Icon(Icons.trending_up))),
+              const SizedBox(height: 12),
+
+              Text('Duration (HH:MM:SS)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              TextFormField(controller: tmpDuration, readOnly: true, decoration: const InputDecoration(prefixIcon: Icon(Icons.access_time))),
+              const SizedBox(height: 12),
+
+              if (_showCost) ...[
+                Text('Cost (₹)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 6),
+                TextFormField(controller: tmpCost, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(hintText: 'e.g. 40.5', prefixIcon: Icon(Icons.currency_rupee))),
+                const SizedBox(height: 12),
+              ],
+
+              if (_showWalkCycleExtras) ...[
+                TextFormField(controller: tmpMood, decoration: const InputDecoration(hintText: 'e.g. Happy', prefixIcon: Icon(Icons.emoji_emotions_outlined))),
+                const SizedBox(height: 12),
+                TextFormField(controller: tmpTrack, decoration: const InputDecoration(hintText: 'e.g. river road', prefixIcon: Icon(Icons.alt_route_outlined))),
+                const SizedBox(height: 12),
+                TextFormField(controller: tmpWeather, decoration: const InputDecoration(hintText: 'e.g. Sunny', prefixIcon: Icon(Icons.wb_sunny_outlined))),
+                const SizedBox(height: 12),
+              ],
+
+              if (_showFatigueStress) ...[
+                const SizedBox(height: 8),
+                Text('Fatigue (0 - 10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
+                        value: double.tryParse(tmpFatigue.text) ?? 0.0,
+                        min: 0,
+                        max: 10,
+                        divisions: 20,
+                        label: (double.tryParse(tmpFatigue.text) ?? 0.0).toStringAsFixed(1),
+                        onChanged: (v) {
+                          setState(() {
+                            tmpFatigue.text = v.toStringAsFixed(1);
+                          });
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 64,
+                      child: TextFormField(
+                        controller: tmpFatigue,
+                        textAlign: TextAlign.center,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text('Stress (0 - 10)', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Slider(
+                        value: double.tryParse(tmpStress.text) ?? 0.0,
+                        min: 0,
+                        max: 10,
+                        divisions: 20,
+                        label: (double.tryParse(tmpStress.text) ?? 0.0).toStringAsFixed(1),
+                        onChanged: (v) {
+                          setState(() {
+                            tmpStress.text = v.toStringAsFixed(1);
+                          });
+                        },
+                      ),
+                    ),
+                    SizedBox(
+                      width: 64,
+                      child: TextFormField(
+                        controller: tmpStress,
+                        textAlign: TextAlign.center,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+              ],
+
+
+              Row(
+                children: [
+                  Expanded(child: OutlinedButton(onPressed: () { FocusManager.instance.primaryFocus?.unfocus(); Navigator.of(context).pop(null); }, child: const Text('Cancel'))),
+                  const SizedBox(width: 12),
+                  Expanded(child: FilledButton(onPressed: () {
+                    FocusManager.instance.primaryFocus?.unfocus();
+                    // Return values as strings; parent will convert/set timestamps/durationSeconds from context
+                    Navigator.of(context).pop(<String,String>{
+                      'productivity': tmpProductivity.text,
+                      'duration': tmpDuration.text,
+                      'cost': tmpCost.text,
+                      'fatigue': tmpFatigue.text,
+                      'stress': tmpStress.text,
+                      'mood': tmpMood.text,
+                      'track': tmpTrack.text,
+                      'weather': tmpWeather.text,
+                    });
+                  }, child: const Text('Save Log'))),
+                ],
+              ),
+
+            ],
+          ),
+        ),
       ),
     );
   }

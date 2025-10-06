@@ -1,27 +1,27 @@
-// lib/widgets/inline_map_tracker.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/widgets.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
-/// Note: OnRouteFinished now includes durationSeconds so parent can save duration.
 typedef OnRouteFinished = void Function({
   required LatLng start,
   required LatLng end,
   required List<LatLng> routePoints,
   required double distanceKm,
   required int durationSeconds,
+  required DateTime startTime,
+  required DateTime endTime,
 });
 
 class InlineMapTracker extends StatefulWidget {
   final double height;
   final OnRouteFinished onRouteFinished;
-
   final VoidCallback? onTripStarted;
   final VoidCallback? onTripEnded;
 
@@ -38,37 +38,67 @@ class InlineMapTracker extends StatefulWidget {
 }
 
 class _InlineMapTrackerState extends State<InlineMapTracker>
-    with
-        AutomaticKeepAliveClientMixin<InlineMapTracker>,
-        WidgetsBindingObserver {
+    with AutomaticKeepAliveClientMixin<InlineMapTracker>, WidgetsBindingObserver {
   GoogleMapController? _mapController;
-  StreamSubscription<Position>? _posSub;
   List<LatLng> _polylinePoints = [];
   bool isTracking = false;
   LatLng? startPos;
   LatLng? endPos;
-
-  // Timer/elapsed
-  Timer? _timer;
+  DateTime? startTime;
+  DateTime? endTime;
   Duration _elapsed = Duration.zero;
 
-  static final CameraPosition _initialCamera = CameraPosition(
+  final _service = FlutterBackgroundService();
+
+  static const CameraPosition _initialCamera = CameraPosition(
     target: LatLng(19.0760, 72.8777),
     zoom: 13,
   );
+
+  StreamSubscription? _serviceSub;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Listen to background service update events
+    _serviceSub = _service.on('update').listen((event) {
+      if (event == null) return;
+
+      try {
+        if (event['type'] == 'time') {
+          final seconds = (event['elapsed_seconds'] as num).toInt();
+          if (mounted) {
+            setState(() {
+              _elapsed = Duration(seconds: seconds);
+            });
+          }
+        }
+
+        if (event['type'] == 'location') {
+          final lat = (event['lat'] as num).toDouble();
+          final lng = (event['lng'] as num).toDouble();
+          final newPoint = LatLng(lat, lng);
+          if (mounted) {
+            setState(() {
+              _polylinePoints.add(newPoint);
+            });
+            _mapController?.animateCamera(CameraUpdate.newLatLng(newPoint));
+          }
+        }
+      } catch (e) {
+        if (kDebugMode) debugPrint('InlineMapTracker: error parsing service event: $e');
+      }
+    });
+
     _restoreTempRouteIfAny();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _timer?.cancel();
-    _posSub?.cancel();
+    _serviceSub?.cancel();
     _mapController?.dispose();
     _saveTempRouteIfNeeded();
     super.dispose();
@@ -77,7 +107,6 @@ class _InlineMapTrackerState extends State<InlineMapTracker>
   @override
   bool get wantKeepAlive => true;
 
-  // lifecycle
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
@@ -88,21 +117,20 @@ class _InlineMapTrackerState extends State<InlineMapTracker>
   }
 
   Future<void> _saveTempRouteIfNeeded() async {
-    if (_polylinePoints.isEmpty) return;
+    if (_polylinePoints.isEmpty && !isTracking) return;
     try {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/_tmp_route.json');
       final data = {
         'polyline': _polylinePoints.map((p) => {'lat': p.latitude, 'lng': p.longitude}).toList(),
         'start': startPos != null ? {'lat': startPos!.latitude, 'lng': startPos!.longitude} : null,
-        'end': endPos != null ? {'lat': endPos!.latitude, 'lng': endPos!.longitude} : null,
         'isTracking': isTracking,
         'elapsedSeconds': _elapsed.inSeconds,
+        'startTime': startTime?.toIso8601String(),
       };
       await file.writeAsString(jsonEncode(data));
-      debugPrint('InlineMapTracker: saved temp route (${_polylinePoints.length} pts, elapsed=${_elapsed.inSeconds}s)');
     } catch (e) {
-      debugPrint('InlineMapTracker: Failed to save temp route: $e');
+      if (kDebugMode) debugPrint('InlineMapTracker: failed to save tmp route: $e');
     }
   }
 
@@ -111,9 +139,13 @@ class _InlineMapTrackerState extends State<InlineMapTracker>
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/_tmp_route.json');
       if (!await file.exists()) return;
+
       final content = await file.readAsString();
       final data = jsonDecode(content);
-      final poly = (data['polyline'] as List).map((e) => LatLng((e['lat'] as num).toDouble(), (e['lng'] as num).toDouble())).toList();
+
+      final poly = (data['polyline'] as List)
+          .map((e) => LatLng((e['lat'] as num).toDouble(), (e['lng'] as num).toDouble()))
+          .toList();
 
       if (!mounted) return;
       setState(() {
@@ -121,62 +153,36 @@ class _InlineMapTrackerState extends State<InlineMapTracker>
         if (data['start'] != null) {
           startPos = LatLng((data['start']['lat'] as num).toDouble(), (data['start']['lng'] as num).toDouble());
         }
-        if (data['end'] != null) {
-          endPos = LatLng((data['end']['lat'] as num).toDouble(), (data['end']['lng'] as num).toDouble());
-        }
         isTracking = data['isTracking'] == true;
         _elapsed = Duration(seconds: (data['elapsedSeconds'] as int?) ?? 0);
+        if (data['startTime'] != null) {
+          try {
+            startTime = DateTime.parse(data['startTime'] as String);
+          } catch (_) {}
+        }
       });
-
-      if (isTracking) {
-        // resume timer if tracking was active
-        _startTimer();
-      }
 
       if (_polylinePoints.isNotEmpty && _mapController != null) {
         _mapController!.animateCamera(CameraUpdate.newLatLng(_polylinePoints.last));
       }
 
-      try {
-        await file.delete();
-      } catch (_) {}
-      debugPrint('InlineMapTracker: restored temp route (${_polylinePoints.length} pts, elapsed=${_elapsed.inSeconds}s)');
+      await file.delete();
     } catch (e) {
-      debugPrint('InlineMapTracker: No temp route to restore or failed: $e');
+      if (kDebugMode) debugPrint('InlineMapTracker: restore tmp route failed: $e');
     }
   }
 
-  // ---------- Timer helpers ----------
-  void _startTimer() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
-      setState(() {
-        _elapsed += const Duration(seconds: 1);
-      });
-    });
+  String _formatSecondsToHms(int seconds) {
+    final h = seconds ~/ 3600;
+    final m = (seconds % 3600) ~/ 60;
+    final s = seconds % 60;
+    return '${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
-  void _stopTimer() {
-    _timer?.cancel();
-    _timer = null;
+  String _formattedElapsed() {
+    return _formatSecondsToHms(_elapsed.inSeconds);
   }
 
-// inside _InlineMapTrackerState
-
-// helper in the state: add this method to format seconds
-String _formatSecondsToHms(int seconds) {
-  final h = seconds ~/ 3600;
-  final m = (seconds % 3600) ~/ 60;
-  final s = seconds % 60;
-  return '${h.toString().padLeft(2,'0')}:${m.toString().padLeft(2,'0')}:${s.toString().padLeft(2,'0')}';
-}
-String _formattedElapsed() {
-  return _formatSecondsToHms(_elapsed.inSeconds);
-}
-
-
-
-  // --------- Tracking ----------
   Future<void> _startTracking() async {
     LocationPermission p = await Geolocator.checkPermission();
     if (p == LocationPermission.denied) {
@@ -191,82 +197,80 @@ String _formattedElapsed() {
       return;
     }
 
-    final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
-    startPos = LatLng(pos.latitude, pos.longitude);
-    _polylinePoints = [startPos!];
-
-    _posSub = Geolocator.getPositionStream(
-      locationSettings: const LocationSettings(
-        accuracy: LocationAccuracy.best,
-        distanceFilter: 6,
-      ),
-    ).listen((Position p) {
-      final latLng = LatLng(p.latitude, p.longitude);
-      setState(() {
-        _polylinePoints.add(latLng);
-      });
-      _mapController?.animateCamera(CameraUpdate.newLatLng(latLng));
-    });
-
-    setState(() {
-      isTracking = true;
-      _elapsed = Duration.zero; // reset timer on start
-    });
-
-    _startTimer();
-
-    // remove old checkpoint if present
     try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/_tmp_route.json');
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
+      final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
+      startPos = LatLng(pos.latitude, pos.longitude);
+      _polylinePoints = [startPos!];
 
-    widget.onTripStarted?.call();
+      setState(() {
+        isTracking = true;
+        _elapsed = Duration.zero;
+        startTime = DateTime.now();
+        endTime = null;
+      });
+
+      // Ensure the background service is started before invoking commands.
+      await _service.startService();
+      // small delay to allow the service to set up listeners
+      await Future.delayed(const Duration(milliseconds: 300));
+      _service.invoke('startTracking');
+
+      widget.onTripStarted?.call();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to start tracking: $e')));
+      }
+      setState(() {
+        isTracking = false;
+      });
+    }
   }
 
   Future<void> _stopTracking() async {
-    final pos = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best);
-    endPos = LatLng(pos.latitude, pos.longitude);
-    _polylinePoints.add(endPos!);
+    // compute end pos
+    if (_polylinePoints.isNotEmpty) {
+      endPos = _polylinePoints.last;
+    } else if (startPos != null) {
+      endPos = startPos;
+    } else {
+      try {
+        final pos = await Geolocator.getLastKnownPosition();
+        if (pos != null) endPos = LatLng(pos.latitude, pos.longitude);
+      } catch (_) {}
+    }
 
-    await _posSub?.cancel();
-    _posSub = null;
+    // make sure service stops collecting
+    try {
+      _service.invoke('stopTracking');
+    } catch (_) {}
 
-    // stop timer and capture elapsed
-    _stopTimer();
+    endTime = DateTime.now();
     final durationSeconds = _elapsed.inSeconds;
 
+    // compute distance in meters using recorded points
     final double distanceMeters = _polylinePoints.asMap().entries.fold<double>(0.0, (acc, e) {
       if (e.key == 0) return 0.0;
       final prev = _polylinePoints[e.key - 1];
-      final cur = _polylinePoints[e.key];
+      final cur = e.value;
       return acc + Geolocator.distanceBetween(prev.latitude, prev.longitude, cur.latitude, cur.longitude);
     });
-
     final km = distanceMeters / 1000.0;
 
     setState(() {
       isTracking = false;
     });
 
-    if (startPos != null && endPos != null) {
+    if (startPos != null && endPos != null && startTime != null && endTime != null) {
       widget.onRouteFinished(
-  start: startPos!,
-  end: endPos!,
-  routePoints: _polylinePoints,
-  distanceKm: km,
-  durationSeconds: _elapsed.inSeconds, // EXACT integer seconds
-);
-
+        start: startPos!,
+        end: endPos!,
+        routePoints: _polylinePoints,
+        distanceKm: km,
+        durationSeconds: durationSeconds,
+        startTime: startTime!,
+        endTime: endTime!,
+      );
     }
-
-    // delete checkpoint
-    try {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File('${dir.path}/_tmp_route.json');
-      if (await file.exists()) await file.delete();
-    } catch (_) {}
 
     widget.onTripEnded?.call();
   }
@@ -277,13 +281,16 @@ String _formattedElapsed() {
       final target = CameraPosition(target: LatLng(pos.latitude, pos.longitude), zoom: 16);
       _mapController?.animateCamera(CameraUpdate.newCameraPosition(target));
     } catch (e) {
-      debugPrint("InlineMapTracker: Error getting location: $e");
+      if (kDebugMode) debugPrint("InlineMapTracker: Error getting location: $e");
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // REQUIRED when using AutomaticKeepAliveClientMixin:
+    // call super.build(context) and ignore the returned value.
     super.build(context);
+
     return Stack(
       children: [
         Container(
@@ -304,63 +311,51 @@ String _formattedElapsed() {
                   _mapController!.animateCamera(CameraUpdate.newLatLng(_polylinePoints.last));
                 }
               },
-              myLocationEnabled: true,
-              myLocationButtonEnabled: false,
               polylines: {
-                if (_polylinePoints.isNotEmpty)
+                if (_polylinePoints.length >= 2)
                   Polyline(
                     polylineId: const PolylineId('route'),
                     points: _polylinePoints,
                     width: 5,
-                    color: Theme.of(context).colorScheme.primary,
                   ),
               },
+              myLocationEnabled: true,
+              myLocationButtonEnabled: false,
             ),
           ),
         ),
 
-        // Elapsed timer display (top-left)
-        if (isTracking)
-          Positioned(
-            top: 16,
-            left: 16,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.timer, size: 16, color: Colors.white),
-                  const SizedBox(width: 8),
-                  Text(
-                    _formattedElapsed(),
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-        // My location button (top-right)
+        // Live elapsed timer overlay (top-left)
         Positioned(
           top: 16,
-          right: 16,
-          child: Material(
-            color: Colors.white,
-            shape: const CircleBorder(),
-            elevation: 3,
-            child: IconButton(
-              icon: const Icon(Icons.my_location, color: Colors.black87),
-              onPressed: _centerToCurrentLocation,
+          left: 24,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              _formattedElapsed(),
+              style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
             ),
           ),
         ),
 
-        // Controls overlay (Start / End)
+        // Center-to-current-location button (top-right)
         Positioned(
-          bottom: 18,
+          top: 16,
+          right: 24,
+          child: FloatingActionButton.small(
+            heroTag: 'centerBtn',
+            onPressed: _centerToCurrentLocation,
+            child: const Icon(Icons.my_location),
+          ),
+        ),
+
+        // Buttons overlay (bottom)
+        Positioned(
+          bottom: 12,
           left: 12,
           right: 12,
           child: Row(
