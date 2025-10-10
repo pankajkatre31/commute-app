@@ -1,7 +1,14 @@
 {
 <<<<<<< HEAD
+<<<<<<< HEAD
   "java.configuration.updateBuildConfiguration": "automatic"
 =======
     "java.configuration.updateBuildConfiguration": "interactive"
 >>>>>>> 0585d68 (Initial commit)
+=======
+    "java.configuration.updateBuildConfiguration": "interactive"
+=======
+  "java.configuration.updateBuildConfiguration": "automatic"
+>>>>>>> f1b843c (Initial commit)
+>>>>>>> 736b101 (Initial commit)
 }
